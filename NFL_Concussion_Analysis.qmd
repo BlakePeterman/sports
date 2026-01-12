@@ -1,0 +1,97 @@
+---
+title: "NFL Concussion Analysis"
+format: html
+---
+
+
+```{r}
+#Load Libraries
+library(dplyr)
+library(nflreadr)
+library(ggplot2)
+```
+
+
+nflreadr contains a database of weekly injury reports. While some injuries can be short term and may not show up on an injury report, concussions will show up on at least 1. 
+
+Since concussions can be long term injuries, a player might show up on multiple injury reports with the same concusison injury. 
+
+Concussions should happen at at least the same rate in the playoffs as in the regular season. (Playoff games are generally more intense than regular season games so there could even be an argument for concussions being more common.) On the other hand, playoff games have higher stakes than most regular season games so players may be less likely to fully report their symptoms. 
+
+Those misaligned incentives are also present in regular season games, where an injured player may lose their role on the team. The NFL has tried to fix this issue by using independent neurologists who have the authority to remove a player from the game for concussion screening.
+
+
+```{r}
+#Load Injury data from nflreadR
+
+injury_df = load_injuries(2020)
+
+injury_df = injury_df %>% mutate(
+    concussion_report_ind   = ifelse(report_primary_injury == "Concussion", 1, 0),
+    concussion_practice_ind = ifelse(practice_primary_injury == "Concussion", 1, 0),
+    week_type               = ifelse(game_type == "REG", "REG", "Postseason")
+)
+
+concussion_df = injury_df %>% filter(concussion_practice_ind == 1) %>% 
+    group_by(week_type, week) %>%
+    summarise(num_concussions = sum(concussion_practice_ind))
+
+```
+
+This plot shows the number of instances "Concussion" shows up on the injury report. This is not equivalent to the number of unique concussions, since players may be on multiple injury reports with the same injury.
+
+```{r}
+ggplot(data = concussion_df, 
+       aes(x = week, y = num_concussions, fill=week_type)) + geom_col() + 
+        labs(
+            y = "Number of Concussions",
+            title = "Number of Concussions by Week (2020)"
+        )
+```
+
+While the plot shows a drastic decline in the number of concussions, there are also a lot fewer playoff games. The next plot shows the rate of concussions per game in each week.
+
+
+```{r}
+#Weeks 1-3 were 16 game weeks, 4 had 15, 5-11 had 14, 
+# Week 12 had 16, 13 had 15, 14-17 had 16
+#Wild Card weekend had 6 games
+#Divisional playoffs had 4
+#Conference championships had 2
+#Super Bowl = 1 game.
+games_per_week = c(rep(16,3)
+                 , rep(15,1)
+                 , rep(14, 7)
+                 , rep(16, 1)
+                 , rep(15, 1)
+                 , rep(16, 4)
+                 , 6
+                 , 4
+                 , 2
+                 , 1)
+#Sort concussion_df by week
+concussion_df <- concussion_df %>% arrange(week) 
+
+#Calculate rate
+concussion_df$concussion_rate <- concussion_df$num_concussions / games_per_week
+
+ggplot(data = concussion_df, 
+       aes(x = week, y = concussion_rate, fill=week_type)) + geom_col() + 
+        labs(
+            y = "Concussion per Game",
+            title = "Concussions per Game by Week (2020)"
+        )
+```
+
+Looking at the rate of concussions on the practice report on a per game basis for 2020, there is no longer a sharp decline at the start of the postseason.
+
+
+```{r}
+# Next steps: 
+# load in more seasons of data
+# load in season data so that the number of games can be dynamically calculated
+# Add logic so only the first concussion for a player is used, but allow for players to have multiple concussions in a year.
+# see if there are any outlier seasons
+# see how things have changed since the independent neuro doc was instituted (started late 2009, fully implemented in 2013)
+    #Not causal estimate: Other things could cut down on the rate of concussions like tackling technique, increased penalties for risky tackles (e.g., Hit on Defenseless Receiver), better helmet technology (e.g., Guardian Caps)
+```
