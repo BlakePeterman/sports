@@ -9,6 +9,7 @@ format: html
 library(dplyr)
 library(nflreadr)
 library(ggplot2)
+library(tidyr)
 ```
 
 
@@ -94,4 +95,57 @@ Looking at the rate of concussions on the practice report on a per game basis fo
 # see if there are any outlier seasons
 # see how things have changed since the independent neuro doc was instituted (started late 2009, fully implemented in 2013)
     #Not causal estimate: Other things could cut down on the rate of concussions like tackling technique, increased penalties for risky tackles (e.g., Hit on Defenseless Receiver), better helmet technology (e.g., Guardian Caps)
+```
+
+# 2009 - 2024
+
+
+```{r}
+injury_seasons = c(2009:2024)
+injury_df = load_injuries(injury_seasons)
+
+injury_df = injury_df %>% mutate(
+    concussion_report_ind   = ifelse(report_primary_injury == "Concussion", 1, 0),
+    concussion_practice_ind = ifelse(practice_primary_injury == "Concussion", 1, 0),
+    week_type               = ifelse(game_type == "REG", "REG", "Postseason")
+)
+
+concussion_df = injury_df %>% filter(concussion_practice_ind == 1) %>% 
+    group_by(season, week_type, week) %>%
+    summarise(num_concussions = sum(concussion_practice_ind))
+
+
+```
+
+
+
+```{r}
+#Load in season game data to calculate concussions per play
+plays_df = load_pbp(injury_seasons)
+
+plays_df = plays_df %>% select(play_id, season_type, week, game_id) %>%
+    mutate(year = as.double(substr(game_id, 1, 4)),
+           season_type = ifelse(season_type == "POST", "Postseason", "REG")) %>%
+    group_by(season_type, week, year) %>%
+    summarise(
+       num_plays = n()
+    )
+
+#Join in number of concussions
+injury_per_play_df <- plays_df %>% left_join(concussion_df, by = join_by("week" == "week", "year" == "season")) %>%
+    mutate(
+        num_concussions = replace_na(num_concussions, 0), #NA for num_concussions means no concussions happend
+        concussions_per_play = num_concussions / num_plays
+    )
+```
+
+This plot shows the concussions per play per week for each season in the data:
+
+```{r}
+ggplot(data = injury_per_play_df, 
+       aes(x = week, y = concussions_per_play, fill=season_type)) + geom_col() + 
+        labs(
+            y = "Concussion per Play",
+            title = "Concussions per Play by Week (2009 - 2024)"
+        ) + facet_wrap(~year)
 ```
