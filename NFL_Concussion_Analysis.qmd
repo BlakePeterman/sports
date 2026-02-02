@@ -13,7 +13,7 @@ library(tidyr)
 ```
 
 
-nflreadr contains a database of weekly injury reports. While some injuries can be short term and may not show up on an injury report, concussions will show up on at least 1. 
+nflreadr contains a database of weekly injury reports. While some injuries can be short term and may not show up on an injury report, concussions will usually show up on at least 1 report. 
 
 Since concussions can be long term injuries, a player might show up on multiple injury reports with the same concusison injury. 
 
@@ -86,17 +86,6 @@ ggplot(data = concussion_df,
 
 Looking at the rate of concussions on the practice report on a per game basis for 2020, there is no longer a sharp decline at the start of the postseason.
 
-
-```{r}
-# Next steps: 
-# load in more seasons of data
-# load in season data so that the number of games can be dynamically calculated
-# Add logic so only the first concussion for a player is used, but allow for players to have multiple concussions in a year.
-# see if there are any outlier seasons
-# see how things have changed since the independent neuro doc was instituted (started late 2009, fully implemented in 2013)
-    #Not causal estimate: Other things could cut down on the rate of concussions like tackling technique, increased penalties for risky tackles (e.g., Hit on Defenseless Receiver), better helmet technology (e.g., Guardian Caps)
-```
-
 # 2009 - 2024
 
 
@@ -148,4 +137,170 @@ ggplot(data = injury_per_play_df,
             y = "Concussion per Play",
             title = "Concussions per Play by Week (2009 - 2024)"
         ) + facet_wrap(~year)
+```
+
+# 2009 - 2020 - Regression Discontinuity Design
+
+This section looks at using Regression Discontinuity Design to see if there are fewer concussions on injury reports per play in the playoffs vs. the regular season. 
+
+The running variable is week of the season. For 2009-2020, weeks 1-17 were regular season weeks and weeks after 17 were postseason weeks. The following plot shows the average concussions per play for each week. A dotted line shows the cutoff between the regular season and the postseason. 
+
+It appears that there is a linear increasing relationship in the regular season and a linear decreasing relationship in the postseason. It also appears to have a discontinuous jump at the threshold. 
+
+```{r}
+#Plot average per play rates
+
+#Week 18 in 2021-2024 was still regular season. 
+
+avg_pre2021_df <- injury_per_play_df %>% filter(year <= 2020) %>%
+    group_by(week, season_type) %>%
+    summarise(
+        avg_concussions_per_play = mean(concussions_per_play)
+    ) %>%
+      mutate(threshold = ifelse(week >= 18, 1, 0))
+
+
+
+ggplot(data = avg_pre2021_df, 
+        aes(x = week, y = avg_concussions_per_play, color=season_type)) + geom_point() +
+        geom_vline(xintercept = 17.5, linetype="dashed") + 
+            labs(
+            y = "Concussion per Play",
+            title = "Average Concussions per Play by Week (including 2009 - 2024)"    
+            ) +   stat_smooth(method = "lm", se = F)
+```
+
+
+
+```{r}
+#Fit model
+lm_same_slope <- lm(avg_concussions_per_play ~ threshold + I(week - 18), data = avg_pre2021_df)
+
+summary(lm_same_slope) 
+
+#But it looks like the slopes vary
+
+
+lm_varying_slope <- lm(avg_concussions_per_play ~ threshold + I(week - 18) + threshold:I(week - 18), data = avg_pre2021_df)
+
+summary(lm_varying_slope) 
+
+
+```
+
+Under both the varying slope and non-varying slope design, there is a statistically significant decrease in the average concussions per play in the postseason. This suggests that fewer concussions are diagnosed in the postseason due to the nature of the game being a win-or-go-home posteason game vs. regular season. 
+
+The magnitude of the effect is between -0.00229 (slope varying) and -0.00389 (same slope). 1000 plays in the postseason result in 2-3 fewer concussions than 1000 plays in the regular season.
+
+# Sensitivity Analyses
+
+## Placebo Cutoff
+
+If there is a causal effect on concussion rates between the regular season and postseason, then there shouldn't be an effect if we consider the threshold to happen during 2 weeks of the regular season. This sensitivity looks to see if that is true for 2 placebo cutoffs.
+```{r}
+#Placebo Cutoff #1 - random week
+set.seed(9)
+placebo_threshold_1 <- sample(4:15, 1)
+print(placebo_threshold_1)
+#Cutoff #2 - median week
+placebo_threshold_2 <- median(1:21)
+print(placebo_threshold_2)
+
+```
+
+```{r}
+#Placebo 1 model
+placebo_1_df <- avg_pre2021_df %>% mutate(season_type = ifelse(week >= placebo_threshold_1, "Postseason","REG"))
+
+ggplot(data = placebo_1_df, 
+        aes(x = week, y = avg_concussions_per_play, color=season_type)) + geom_point() +
+        geom_vline(xintercept = placebo_threshold_1-0.5, linetype="dashed") + 
+            labs(
+            y = "Concussion per Play",
+            title = "Average Concussions per Play by Week (including 2009 - 2024)"    
+            ) +   stat_smooth(method = "lm", se = F)
+
+ggplot(data = placebo_1_df, 
+        aes(x = week, y = avg_concussions_per_play, color=season_type)) + geom_point() +
+        geom_vline(xintercept = placebo_threshold_1-0.5, linetype="dashed") + 
+            labs(
+            y = "Concussion per Play",
+            title = "Average Concussions per Play by Week (including 2009 - 2024)"    
+            ) +   stat_smooth(method = "loess", se = F)
+
+```
+
+A linear model looks like there may be a discontinuity at the 1st placebo threshold, but a loess fit shows the opposite and the plot doesn't look like there is a discontinuity.
+
+```{r}
+lm_same_slope <- lm(avg_concussions_per_play ~ threshold + I(week - placebo_threshold_1), data = placebo_1_df)
+
+summary(lm_same_slope) 
+
+#But it looks like the slopes vary
+
+
+lm_varying_slope <- lm(avg_concussions_per_play ~ threshold + I(week - placebo_threshold_1) + threshold:I(week - placebo_threshold_1), data = placebo_1_df)
+
+summary(lm_varying_slope) 
+
+
+
+```
+
+The models show a statisticaly significant, but small, effect without varying slope. A same slope on both sides of the threshold isn't supported by the plots and the model that allows a different slope shows no statitstically significant effect at the 5% level. 
+
+
+```{r}
+#Placebo 1 model
+placebo_2_df <- avg_pre2021_df %>% mutate(season_type = ifelse(week >= placebo_threshold_2, "Postseason","REG"))
+
+ggplot(data = placebo_2_df, 
+        aes(x = week, y = avg_concussions_per_play, color=season_type)) + geom_point() +
+        geom_vline(xintercept = placebo_threshold_2-0.5, linetype="dashed") + 
+            labs(
+            y = "Concussion per Play",
+            title = "Average Concussions per Play by Week (including 2009 - 2024)"    
+            ) +   stat_smooth(method = "lm", se = F)
+
+ggplot(data = placebo_2_df, 
+        aes(x = week, y = avg_concussions_per_play, color=season_type)) + geom_point() +
+        geom_vline(xintercept = placebo_threshold_2-0.5, linetype="dashed") + 
+            labs(
+            y = "Concussion per Play",
+            title = "Average Concussions per Play by Week (including 2009 - 2024)"    
+            ) +   stat_smooth(method = "loess", se = F)
+
+```
+
+A linear model looks like there may be a discontinuity at the 2nd placebo threshold, but a loess fit shows the opposite and the plot doesn't look like there is a discontinuity.
+
+```{r}
+lm_same_slope <- lm(avg_concussions_per_play ~ threshold + I(week - placebo_threshold_2), data = placebo_2_df)
+
+summary(lm_same_slope) 
+
+#But it looks like the slopes vary
+
+
+lm_varying_slope <- lm(avg_concussions_per_play ~ threshold + I(week - placebo_threshold_2) + threshold:I(week - placebo_threshold_2), data = placebo_2_df)
+
+summary(lm_varying_slope) 
+
+lm_non_linear_slope <- lm(avg_concussions_per_play  ~ threshold + I(week - placebo_threshold_2) + I((week -placebo_threshold_2)^2) + threshold:I(week - placebo_threshold_2) +
+       threshold:I((week - placebo_threshold_2)^2), data = placebo_2_df)
+
+summary(lm_non_linear_slope) 
+
+
+
+```
+
+With varying slopes, there is still a staistically significant effect. That effect disappears when the model allows for non-linear slopes. The plot looks non-linear, so the non-linear model is likely more appropriate.
+
+```{r}
+# Next steps: 
+# Add logic so only the first concussion for a player is used, but allow for players to have multiple concussions in a year?
+# see how things have changed since the independent neuro doc was instituted (started late 2009, fully implemented in 2013)
+    #Not causal estimate: Other things could cut down on the rate of concussions like tackling technique, increased penalties for risky tackles (e.g., Hit on Defenseless Receiver), better helmet technology (e.g., Guardian Caps)
 ```
